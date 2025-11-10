@@ -1,0 +1,35 @@
+# Python virtual environments (uv, venv, etc.)
+project_dl/
+.venv*/
+env-*/
+uv.lock
+__pypackages__/
+
+# macOS system files
+.DS_Store
+._*
+
+# IDEs & editors
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-workspace
+
+# Logs & caches
+*.log
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+
+# Build / dist
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+Thumbs.db
+
