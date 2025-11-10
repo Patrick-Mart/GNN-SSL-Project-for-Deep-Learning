@@ -8,6 +8,7 @@ __pypackages__/
 # macOS system files
 .DS_Store
 ._*
+data/
 
 # IDEs & editors
 .vscode/
