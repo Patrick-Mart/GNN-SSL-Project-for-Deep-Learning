@@ -1,6 +1,10 @@
 import torch
 from torch_geometric.data import HeteroData
-
+import os
+from typing import Tuple
+from ogb.nodeproppred import PygNodePropPredDataset
+from torch_geometric.datasets import OGB_MAG
+import torch_geometric.transforms as T
 
 def to_inductive(data: HeteroData, node_type: str) -> HeteroData:
     """
@@ -56,3 +60,18 @@ def to_inductive(data: HeteroData, node_type: str) -> HeteroData:
         data[edge_type]['edge_index'] = filtered_edge_index
 
     return data
+
+
+class MAG240MInductiveDataset:
+    def __init__(self, root: str = "../data"):
+        root = os.path.expanduser(root)
+        dataset = OGB_MAG(root="..data/", transform = T.ToUndirected())[0]
+        self.data = dataset
+        #self.split_idx = dataset.get_idx_split()
+
+        # Create inductive version (only train papers + their subgraph)
+        print("Creating inductive split (removing val/test papers and cross edges)...")
+        self.inductive_data = to_inductive(self.data.clone(), node_type='paper')
+
+    def get_data(self) -> Tuple[HeteroData, dict]:
+        return self.inductive_data #, self.split_idx  # split_idx kept for reference
