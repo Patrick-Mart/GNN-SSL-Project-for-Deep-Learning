@@ -14,10 +14,14 @@ from torch.nn.functional import cross_entropy,mse_loss
 from torch_geometric.utils import index_to_mask, mask_to_index, mask_select
 from torch.nn import Linear, ReLU, Softmax
 from tqdm import tqdm
+from inductive import to_inductive
 
 dataset = OGB_MAG(root='GNN-SSL-Project-for-Deep-Learning/data/',
                   transform=ToUndirected(),
                   preprocess="metapath2vec")[0]
+
+node_type = "paper"
+dataset = to_inductive(dataset.clone(), node_type)
 
 num_neighbors = [15, 10, 5]
 batch_size = 64
@@ -28,19 +32,18 @@ train_batch = NeighborLoader(dataset,
                         batch_size=batch_size, 
                         shuffle=True, 
                         num_workers=0)
-test_batch = NeighborLoader(dataset, 
-                        num_neighbors=num_neighbors, 
-                        input_nodes=('paper', dataset['paper'].test_mask),
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        num_workers=0)
-val_batch = NeighborLoader(dataset, 
-                        num_neighbors=num_neighbors, 
-                        input_nodes=('paper', dataset['paper'].val_mask),
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        num_workers=0)
-
+# test_batch = NeighborLoader(dataset, 
+#                         num_neighbors=num_neighbors, 
+#                         input_nodes=('paper', dataset['paper'].test_mask),
+#                         batch_size=batch_size, 
+#                         shuffle=True, 
+#                         num_workers=0)
+# val_batch = NeighborLoader(dataset, 
+#                         num_neighbors=num_neighbors, 
+#                         input_nodes=('paper', dataset['paper'].val_mask),
+#                         batch_size=batch_size, 
+#                         shuffle=True, 
+#                         num_workers=0)
 batch = next(iter(train_batch))
 class graphSAGESSL(nn.Module):
     def __init__(self,edge_types,hidden_dim,output_dim):
@@ -84,26 +87,29 @@ def formatting2loss(out,x_dict,mask):
 
 unk_emb = nn.ModuleDict({
     t: nn.Embedding(1, 128)
-    for t in batch.node_types 
+    for t in dataset.node_types 
 })
 
 opt = torch.optim.Adam(list(model.parameters())+list(unk_emb.parameters()), lr=0.01)
 
 
-epochs = 50
+epochs = 3
+print("Start of training...")
 for epoch in range(epochs):
-    model.train()
-    total_loss = 0
-    x_dict = build_x_dict(batch)
-    edge_index_dict = {edge_type : batch[edge_type].edge_index for edge_type in batch.edge_types}
-    x_dict_masked,mask = mask_x_dict(x_dict,p=0.9)
-    out,venue_pred = model(x_dict_masked,edge_index_dict)
-    out_formatted,x_formatted = formatting2loss(out,x_dict,mask)
-    loss = mse_loss(out_formatted,x_formatted)
-    opt.zero_grad()
-    loss.backward()
-    opt.step()
-    total_loss += loss.item() 
+    print(f"Epoch {epoch}")
+    for batch in train_batch:
+        model.train()
+        total_loss = 0
+        x_dict = build_x_dict(batch)
+        edge_index_dict = {edge_type : batch[edge_type].edge_index for edge_type in batch.edge_types}
+        x_dict_masked,mask = mask_x_dict(x_dict,p=0.9)
+        out,venue_pred = model(x_dict_masked,edge_index_dict)
+        out_formatted,x_formatted = formatting2loss(out,x_dict,mask)
+        loss = mse_loss(out_formatted,x_formatted)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        total_loss += loss.item() 
     prediction = torch.argmax(Softmax(dim=1)(venue_pred),dim=-1)
     acc = (prediction == batch['paper'].y).sum()/batch['paper'].y.shape[0]
     print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss:.4f}, Accuracy: {acc:.4f}")
