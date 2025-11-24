@@ -23,15 +23,16 @@ dataset = OGB_MAG(root='GNN-SSL-Project-for-Deep-Learning/data/',
 node_type = "paper"
 dataset = to_inductive(dataset.clone(), node_type)
 
-num_neighbors = [15, 10, 5]
-batch_size = 64
+# num_neighbors = [15, 10, 5]
+num_neighbors = [8, 5]
+batch_size = 256
 
 train_batch = NeighborLoader(dataset, 
                         num_neighbors=num_neighbors, 
                         input_nodes=('paper', dataset['paper'].train_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 # test_batch = NeighborLoader(dataset, 
 #                         num_neighbors=num_neighbors, 
 #                         input_nodes=('paper', dataset['paper'].test_mask),
@@ -44,6 +45,7 @@ train_batch = NeighborLoader(dataset,
 #                         batch_size=batch_size, 
 #                         shuffle=True, 
 #                         num_workers=0)
+
 batch = next(iter(train_batch))
 class graphSAGESSL(nn.Module):
     def __init__(self,edge_types,hidden_dim,output_dim):
@@ -72,7 +74,7 @@ def build_x_dict(batch):
         x_dict[node_type] = batch[node_type].x
     return x_dict
 
-def mask_x_dict(x_dict,p=0.9):
+def mask_x_dict(x_dict,p=0.75):
     mask = {}
     x_dict_masked = {}
     for k,v in x_dict.items():
@@ -97,6 +99,7 @@ epochs = 3
 print("Start of training...")
 for epoch in range(epochs):
     print(f"Epoch {epoch}")
+    i = 1
     for batch in train_batch:
         model.train()
         total_loss = 0
@@ -110,6 +113,10 @@ for epoch in range(epochs):
         loss.backward()
         opt.step()
         total_loss += loss.item() 
+
+        print(f"Epoch {epoch}, batch {i}")
+        i += 1
+
     prediction = torch.argmax(Softmax(dim=1)(venue_pred),dim=-1)
     acc = (prediction == batch['paper'].y).sum()/batch['paper'].y.shape[0]
     print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss:.4f}, Accuracy: {acc:.4f}")
