@@ -29,7 +29,7 @@ dataset_inductive = dataset_inductive.to(device)
 
 
 # HYPERPARAMETERS
-num_neighbors = [8, 5]
+num_neighbors = [5, 5, 5]
 batch_size = 256
 hidden_dim = 256
 out_channels = dataset['paper'].x.shape[1]
@@ -66,11 +66,16 @@ class graphSAGE_ENCODER(nn.Module):
             (-1, -1), hidden_dim) for edge_type in edge_types}, aggr='sum')
         self.conv2 = HeteroConv({edge_type: SAGEConv(
             (-1, -1), hidden_dim) for edge_type in edge_types}, aggr='sum')
+        # layer 3
+        self.conv3 = HeteroConv({edge_type: SAGEConv(
+            (-1, -1), hidden_dim) for edge_type in edge_types}, aggr='sum')
 
     def forward(self, x_dict, edge_index_dict):
         x_dict = self.conv1(x_dict, edge_index_dict)
         x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
         x_dict = self.conv2(x_dict, edge_index_dict)
+        x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
+        x_dict = self.conv3(x_dict, edge_index_dict)
         return x_dict
 
 
@@ -83,6 +88,10 @@ class graphSAGE_DECODER(nn.Module):
         x_dict = {k:self.decoder(v) for (k,v) in x_dict.items()}
         return x_dict
 
+"""
+All paper embeddings where sampling was done wrt. that paper
+"""
+# x_dict['paper'][:batch_size]
 
 
 print("Creating models...\n")
@@ -175,3 +184,11 @@ for epoch in range(epochs):
 
     print(
         f"Epoch {epoch+1}/{epochs}, Loss: {total_loss_train:.4f}, Val Loss: {total_loss_val:.4f}")
+
+
+for batch in train_batch:
+    x_dict = build_x_dict(batch)
+    edge_index_dict = {
+            edge_type: batch[edge_type].edge_index for edge_type in batch.edge_types}
+
+    z_prime = encoder(x_dict, edge_index_dict)

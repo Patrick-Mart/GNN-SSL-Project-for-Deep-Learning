@@ -35,8 +35,8 @@ dataset_inductive = dataset_inductive.to(device)
 
 # HYPERPARAMETERS
 num_epochs = 20
-num_neighbors = [8, 5]
-batch_size = 256
+num_neighbors = [5, 5, 5]
+batch_size = 64
 hidden_channels = 64
 out_channels = max(dataset['paper'].y).item() + 1
 
