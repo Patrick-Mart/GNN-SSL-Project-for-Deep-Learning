@@ -77,10 +77,10 @@ class graphSAGE_ENCODER(nn.Module):
 class graphSAGE_DECODER(nn.Module):
     def __init__(self, node_types, hidden_dim, output_dim):
         super().__init__()
-        self.decoder = {node_type : Linear(hidden_dim,output_dim) for node_type in node_types}
+        self.decoder = Linear(hidden_dim,output_dim)
 
     def forward(self, x_dict):
-        x_dict = {k:self.decoder[k](v) for (k,v) in x_dict.items()}
+        x_dict = {k:self.decoder(v) for (k,v) in x_dict.items()}
         return x_dict
 
 
@@ -93,7 +93,7 @@ decoder = graphSAGE_DECODER(dataset.node_types, hidden_dim, out_channels).to(dev
 def build_x_dict(batch):
     x_dict = {}
     for node_type in batch.node_types:
-        x_dict[node_type] = batch[node_type].x
+        x_dict[node_type] = batch[node_type].x.to(device)
     return x_dict
 
 
@@ -101,7 +101,7 @@ def mask_x_dict(x_dict, p=0.6):
     mask = {}
     x_dict_masked = {}
     for k, v in x_dict.items():
-        mask[k] = torch.rand(v.shape[0]) < p
+        mask[k] = (torch.rand(v.shape[0]) < p).to(device)
         x_dict_masked[k] = x_dict[k].clone()*(mask[k].unsqueeze(-1)) + unk_emb[k](
             torch.zeros_like(mask[k], dtype=torch.long))*(~mask[k].unsqueeze(-1))
     return x_dict_masked, mask
@@ -122,7 +122,7 @@ opt = torch.optim.Adam(
     list(encoder.parameters())+list(unk_emb.parameters()) + list(decoder.parameters()), lr=0.01)
 
 
-epochs = 3
+epochs = 50
 print("Start of training...")
 for epoch in range(epochs):
     print(f"Epoch {epoch}")
