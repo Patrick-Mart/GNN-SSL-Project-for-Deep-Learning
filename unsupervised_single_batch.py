@@ -1,3 +1,4 @@
+print("Begin package importation...\n")
 import torch
 import torch.nn as nn
 #!pip install torch_geometric
@@ -5,49 +6,57 @@ import torch.nn as nn
 #!pip install pandas
 import torch_geometric
 from torch_geometric.datasets import OGB_MAG
-from torch_geometric.loader import HGTLoader
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.nn import SAGEConv
 from torch_geometric.nn.conv import HeteroConv
 from torch_geometric.transforms import ToUndirected
-from torch.nn.functional import cross_entropy, mse_loss
-from torch_geometric.utils import index_to_mask, mask_to_index, mask_select
-from torch.nn import Linear, ReLU, Softmax
-from tqdm import tqdm
+from torch.nn.functional import mse_loss
+from torch.nn import Linear, ReLU
 from inductive import to_inductive
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}\n")
+
+print("Load dataset...\n")
 dataset = OGB_MAG(root='GNN-SSL-Project-for-Deep-Learning/data/',
                   transform=ToUndirected(),
                   preprocess="metapath2vec")[0]
 
 node_type = "paper"
-dataset = to_inductive(dataset.clone(), node_type)
+dataset_inductive = to_inductive(dataset.clone(), node_type)
+dataset = dataset.to(device)
+dataset_inductive = dataset_inductive.to(device)
 
-# num_neighbors = [15, 10, 5]
+
+# HYPERPARAMETERS
 num_neighbors = [8, 5]
 batch_size = 256
+hidden_dim = 256
+out_channels = dataset['paper'].x.shape[1]
 
-train_batch = NeighborLoader(dataset,
-                             num_neighbors=num_neighbors,
-                             input_nodes=(
-                                 'paper', dataset['paper'].train_mask),
-                             batch_size=batch_size,
-                             shuffle=True,
-                             num_workers=4)
-# test_batch = NeighborLoader(dataset,
-#                         num_neighbors=num_neighbors,
-#                         input_nodes=('paper', dataset['paper'].test_mask),
-#                         batch_size=batch_size,
-#                         shuffle=True,
-#                         num_workers=0)
-# val_batch = NeighborLoader(dataset,
-#                         num_neighbors=num_neighbors,
-#                         input_nodes=('paper', dataset['paper'].val_mask),
-#                         batch_size=batch_size,
-#                         shuffle=True,
-#                         num_workers=0)
+print("Create batches...\n")
 
-batch = next(iter(train_batch))
+train_batch = NeighborLoader(dataset_inductive, 
+                        num_neighbors=num_neighbors, 
+                        input_nodes=('paper', dataset_inductive['paper'].train_mask),
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        num_workers=0)
+
+test_batch = NeighborLoader(dataset, 
+                        num_neighbors=num_neighbors, 
+                        input_nodes=('paper', dataset['paper'].test_mask),
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        num_workers=0)
+
+val_batch = NeighborLoader(dataset, 
+                        num_neighbors=num_neighbors, 
+                        input_nodes=('paper', dataset['paper'].val_mask),
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        num_workers=0)
+
 
 
 class graphSAGE_ENCODER(nn.Module):
@@ -66,19 +75,19 @@ class graphSAGE_ENCODER(nn.Module):
 
 
 class graphSAGE_DECODER(nn.Module):
-    def __init__(self, hidden_dim, output_dim):
+    def __init__(self, node_types, hidden_dim, output_dim):
         super().__init__()
-        self.decoder = nn.Linear(hidden_dim, output_dim)
+        self.decoder = {node_type : Linear(hidden_dim,output_dim) for node_type in node_types}
 
     def forward(self, x_dict):
-        return self.decoder(x_dict['paper'])
+        x_dict = {k:self.decoder[k](v) for (k,v) in x_dict.items()}
+        return x_dict
 
 
-hidden_dim = batch['paper'].x.shape[1]
-out_channels = max(batch['paper'].y).item() + 1
 
-encoder = graphSAGE_ENCODER(batch.edge_types, hidden_dim)
-decoder = graphSAGE_DECODER(hidden_dim, out_channels)
+print("Creating models...\n")
+encoder = graphSAGE_ENCODER(dataset.edge_types, hidden_dim).to(device)
+decoder = graphSAGE_DECODER(dataset.node_types, hidden_dim, out_channels).to(device)
 
 
 def build_x_dict(batch):
@@ -88,7 +97,7 @@ def build_x_dict(batch):
     return x_dict
 
 
-def mask_x_dict(x_dict, p=0.75):
+def mask_x_dict(x_dict, p=0.6):
     mask = {}
     x_dict_masked = {}
     for k, v in x_dict.items():
@@ -107,11 +116,10 @@ def formatting2loss(out, x_dict, mask):
 unk_emb = nn.ModuleDict({
     t: nn.Embedding(1, 128)
     for t in dataset.node_types
-})
+}).to(device)
 
-opt_encoder = torch.optim.Adam(
-    list(encoder.parameters())+list(unk_emb.parameters()), lr=0.01)
-opt_decoder = torch.optim.Adam(decoder.parameters(), lr=0.01)
+opt = torch.optim.Adam(
+    list(encoder.parameters())+list(unk_emb.parameters()) + list(decoder.parameters()), lr=0.01)
 
 
 epochs = 3
@@ -120,38 +128,50 @@ for epoch in range(epochs):
     print(f"Epoch {epoch}")
     i = 1
     for batch in train_batch:
-        # Train the encoder
         encoder.train()
-        total_loss_encoder = 0
+        decoder.train()
+        total_loss_train = 0
         x_dict = build_x_dict(batch)
         edge_index_dict = {
             edge_type: batch[edge_type].edge_index for edge_type in batch.edge_types}
-        x_dict_masked, mask = mask_x_dict(x_dict, p=0.9)
+        x_dict_masked, mask = mask_x_dict(x_dict, p=0.4)
         out = encoder(x_dict_masked, edge_index_dict)
+        out = decoder(out)
         out_formatted, x_formatted = formatting2loss(out, x_dict, mask)
-        loss_encoder = mse_loss(out_formatted, x_formatted)
-        opt_encoder.zero_grad()
-        loss_encoder.backward()
-        opt_encoder.step()
-        opt_encoder.zero_grad()
-        total_loss_encoder += loss_encoder.item()
-
-        # Train the decoder
-        decoder.train()
-        out = {k: v.detach() for k, v in out.items()}
-        total_loss_decoder = 0
-        venue_pred = decoder(out)
-        loss_decoder = cross_entropy(venue_pred, batch['paper'].y)
-        opt_decoder.zero_grad()
-        loss_decoder.backward()
-        opt_decoder.step()
-        opt_decoder.zero_grad()
-        total_loss_decoder += loss_decoder.item()
-
-        print(f"Epoch {epoch}, batch {i}")
+        loss = mse_loss(out_formatted, x_formatted)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+        total_loss_train += loss.item()
+        print(f"Epoch {epoch}, batch {i}, Training loss: {loss.item():.4f}")
         i += 1
+        '''
+        if i==5:
+            break
+        '''
+    
+    i=1
+    for batch in val_batch:
+        encoder.eval()
+        decoder.eval()
+        total_loss_val = 0
+        x_dict = build_x_dict(batch)
+        edge_index_dict = {
+            edge_type: batch[edge_type].edge_index for edge_type in batch.edge_types}
+        x_dict_masked, mask = mask_x_dict(x_dict, p=0.4)
+        out = encoder(x_dict_masked, edge_index_dict)
+        out = decoder(out)
+        out_formatted, x_formatted = formatting2loss(out, x_dict, mask)
+        loss = mse_loss(out_formatted, x_formatted)
+        total_loss_val += loss.item()
+        print(f"Epoch {epoch}, batch {i}, Validation loss: {loss.item():.4f}")
+        i += 1
+        '''
+        if i==5:
+            break
+        '''
+        
 
-    prediction = torch.argmax(Softmax(dim=1)(venue_pred), dim=-1)
-    acc = (prediction == batch['paper'].y).sum()/batch['paper'].y.shape[0]
     print(
-        f"Epoch {epoch+1}/{epochs}, Loss: {total_loss_encoder:.4f}, Accuracy: {acc:.4f}")
+        f"Epoch {epoch+1}/{epochs}, Loss: {total_loss_train:.4f}, Val Loss: {total_loss_val:.4f}")
