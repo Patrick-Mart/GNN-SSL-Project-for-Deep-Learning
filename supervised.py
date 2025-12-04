@@ -10,7 +10,9 @@ from torch_geometric.nn.conv import HeteroConv
 from torch_geometric.transforms import ToUndirected
 from torch.nn.functional import cross_entropy
 from torch.nn import Linear, ReLU, Softmax
+from inductive import to_inductive
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 print(torch.__version__)
 if torch.cuda.is_available():
@@ -29,14 +31,15 @@ else:
     dataset = OGB_MAG(root='GNN-SSL-Project-for-Deep-Learning/data/',
                   transform=ToUndirected())[0]
     
-dataset_inductive = dataset.clone()
+node_type = "paper"
+dataset_inductive = to_inductive(dataset.clone(), node_type)
 dataset = dataset.to(device)
 dataset_inductive = dataset_inductive.to(device)
 
 # HYPERPARAMETERS
-num_epochs = 20
+num_epochs = 5
 num_neighbors = [5, 5, 5]
-batch_size = 64
+batch_size = 128
 hidden_channels = 64
 out_channels = max(dataset['paper'].y).item() + 1
 
@@ -47,21 +50,21 @@ train_batch = NeighborLoader(dataset_inductive,
                         input_nodes=('paper', dataset_inductive['paper'].train_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 
 test_batch = NeighborLoader(dataset, 
                         num_neighbors=num_neighbors, 
                         input_nodes=('paper', dataset['paper'].test_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 
 val_batch = NeighborLoader(dataset, 
                         num_neighbors=num_neighbors, 
                         input_nodes=('paper', dataset['paper'].val_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 
 
 
@@ -119,6 +122,9 @@ def build_x_dict(batch):
     return x_dict
 
 
+train_accs = []
+val_accs = []
+
 @torch.no_grad()
 def infer(loader):
     model.eval()
@@ -136,16 +142,55 @@ print("Start training...\n")
 for epoch in range(1, num_epochs):
     model.train()
     tr_loss = 0
+    train_correct = 0
+    train_total = 0
+
     for batch in tqdm(train_batch, desc=f"Epoch {epoch}/{num_epochs}"):
         x_dict = build_x_dict(batch)
         edge_index_dict = {edge_type : batch[edge_type].edge_index for edge_type in batch.edge_types}
-        logits = model(x_dict, edge_index_dict)
+        logits = model(x_dict, edge_index_dict)#['paper']        # add paper
         loss = cross_entropy(logits, batch['paper'].y)
         opt.zero_grad()
         loss.backward()
         opt.step()
         tr_loss += loss.item()
+
+
+        # # Training accuracy on the current batch
+        # pred = logits.argmax(dim=-1)
+        # train_acc = (pred == batch['paper'].y.squeeze()).float().mean().item()
+
+    
+
     print("Evaluating...\n")
     val_pred, val_true = infer(val_batch)
     val_metric = (val_pred == val_true).sum().item() / val_true.size(0)
     print(f"Epoch {epoch:02d} | loss {tr_loss:.4f} | val {val_metric:.4f}\n")
+
+    train_pred, train_true = infer(train_batch)
+    train_metric = (train_pred == train_true).sum().item() / train_true.size(0)
+
+    train_accs.append(train_metric)
+    val_accs.append(val_metric)
+
+print("train")
+print(train_accs)
+print("val")
+print(val_accs)
+
+
+plt.figure(figsize=(10, 6))
+
+
+plt.plot([i for i in range(1, num_epochs+1)], train_accs, label="training", marker="o", linewidth=2)
+plt.plot([i for i in range(1, num_epochs+1)], val_accs, label="validation", marker="o", linewidth=2)
+
+plt.legend(title="Keys", fontsize=10, title_fontsize=12, loc="best")
+plt.xlabel("Index (time step, node, etc.)")
+plt.ylabel("Value")
+plt.title("Comparison of arrays")
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+
+plt.savefig("GNN-SSL-Project-for-Deep-Learning/results/baseline_accuracies.png", dpi=300, bbox_inches='tight')

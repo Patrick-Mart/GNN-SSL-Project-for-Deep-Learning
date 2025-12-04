@@ -30,8 +30,8 @@ dataset_inductive = dataset_inductive.to(device)
 
 # HYPERPARAMETERS
 num_neighbors = [5, 5, 5]
-batch_size = 256
-hidden_dim = 256
+batch_size = 128
+hidden_dim = 64
 out_channels = dataset['paper'].x.shape[1]
 
 print("Create batches...\n")
@@ -41,21 +41,21 @@ train_batch = NeighborLoader(dataset_inductive,
                         input_nodes=('paper', dataset_inductive['paper'].train_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 
 test_batch = NeighborLoader(dataset, 
                         num_neighbors=num_neighbors, 
                         input_nodes=('paper', dataset['paper'].test_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 
 val_batch = NeighborLoader(dataset, 
                         num_neighbors=num_neighbors, 
                         input_nodes=('paper', dataset['paper'].val_mask),
                         batch_size=batch_size, 
                         shuffle=True, 
-                        num_workers=0)
+                        num_workers=4)
 
 
 
@@ -131,8 +131,22 @@ opt = torch.optim.Adam(
     list(encoder.parameters())+list(unk_emb.parameters()) + list(decoder.parameters()), lr=0.01)
 
 
-epochs = 50
+# Should be moved to the end 
+Z_prime = torch.Tensor(size=(torch.sum(dataset_inductive['paper'].train_mask), hidden_dim)).to(device)
+
+for batch in train_batch:
+    x_dict = build_x_dict(batch)
+    edge_index_dict = {edge_type : batch[edge_type].edge_index for edge_type in batch.edge_types}
+    Z = encoder(x_dict, edge_index_dict)
+    Z_prime[batch['paper'].n_id[:batch_size]] = Z['paper'][:batch_size]
+
+    break
+
+
+epochs = 2
 print("Start of training...")
+best_loss = torch.inf
+best_model = encoder
 for epoch in range(epochs):
     print(f"Epoch {epoch}")
     i = 1
@@ -159,6 +173,7 @@ for epoch in range(epochs):
         if i==5:
             break
         '''
+
     
     i=1
     for batch in val_batch:
@@ -180,15 +195,25 @@ for epoch in range(epochs):
         if i==5:
             break
         '''
-        
 
+    if  total_loss_val < best_loss:
+        best_model = encoder
+        best_loss = total_loss_val
+
+    
+    
+    
     print(
         f"Epoch {epoch+1}/{epochs}, Loss: {total_loss_train:.4f}, Val Loss: {total_loss_val:.4f}")
+    
+
+# torch.save(best_model, "best_encoder.pth")
+torch.save(best_model.state_dict(), f"best_encoder_b{batch_size}_h{hidden_dim}.pth")
+
+# encoder = Encoder()  # must define the same architecture
+# encoder.load_state_dict(torch.load("best_encoder.pth"))
+# encoder.eval()
 
 
-for batch in train_batch:
-    x_dict = build_x_dict(batch)
-    edge_index_dict = {
-            edge_type: batch[edge_type].edge_index for edge_type in batch.edge_types}
 
-    z_prime = encoder(x_dict, edge_index_dict)
+  
