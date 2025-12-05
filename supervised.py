@@ -194,9 +194,9 @@ plt.plot([i for i in range(1, num_epochs)], train_accs, label="training", marker
 plt.plot([i for i in range(1, num_epochs)], val_accs, label="validation", marker="o", linewidth=2)
 
 plt.legend(title="Dataset", fontsize=10, title_fontsize=12, loc="best")
-plt.xlabel("Index (time step, node, etc.)")
-plt.ylabel("Value")
-plt.title("Comparison of arrays")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.title("Supervised Learning accuracies during training")
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
