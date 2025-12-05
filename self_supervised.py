@@ -13,7 +13,6 @@ from torch.nn import Linear, ReLU, Softmax
 from inductive import to_inductive
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from unsupervised_features import graphSAGE_ENCODER
 
 print(torch.__version__)
 if torch.cuda.is_available():
@@ -21,8 +20,27 @@ if torch.cuda.is_available():
 print(torch.cuda.is_available())
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+class graphSAGE_ENCODER(nn.Module):
+    def __init__(self, edge_types, hidden_dim):
+        super().__init__()
+        self.conv1 = HeteroConv({edge_type: SAGEConv(
+            (-1, -1), hidden_dim) for edge_type in edge_types}, aggr='sum')
+        self.conv2 = HeteroConv({edge_type: SAGEConv(
+            (-1, -1), hidden_dim) for edge_type in edge_types}, aggr='sum')
+        # layer 3
+        self.conv3 = HeteroConv({edge_type: SAGEConv(
+            (-1, -1), hidden_dim) for edge_type in edge_types}, aggr='sum')
+
+    def forward(self, x_dict, edge_index_dict):
+        x_dict = self.conv1(x_dict, edge_index_dict)
+        # x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
+        x_dict = self.conv2(x_dict, edge_index_dict)
+        # x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
+        x_dict = self.conv3(x_dict, edge_index_dict)
+        return x_dict
+
 # If your computer does not have enough memory, set temp = True to use preprocessed features
-temp = False
+temp = True
 
 if temp:
     dataset = OGB_MAG(root='GNN-SSL-Project-for-Deep-Learning/data/',
@@ -42,7 +60,8 @@ num_epochs = 5
 num_neighbors = [5, 5, 5]
 batch_size = 128
 hidden_channels = 256
-out_channels = max(dataset['paper'].y).item() + 1
+# out_channels = max(dataset['paper'].y).item() + 1
+out_channels = max(dataset.cpu()['paper'].y).item() + 1
 
 print("Create batches...\n")
 
@@ -79,7 +98,7 @@ else:
         t: nn.Embedding(dataset[t].num_nodes, 128)
         for t in featless
     })
-    # emb = emb.to(device)
+    emb = emb.to(device)
 
 
 
@@ -87,7 +106,7 @@ class graphSAGEmodel(nn.Module):
     def __init__(self, edge_types, hidden, out_channels):
         super().__init__()
         # edge_types = edge_types
-        self.encoder = graphSAGE_ENCODER(dataset.edge_types, hidden_channels).to(device)
+        self.encoder = graphSAGE_ENCODER(edge_types, hidden_channels)
 
         state = torch.load("best_encoder_b128_h256.pth", map_location=device)
         self.encoder.load_state_dict(state)
@@ -101,7 +120,7 @@ class graphSAGEmodel(nn.Module):
 
     def forward(self, x_dict, edge_index_dict):
         # return logits for papers only
-        x_dict = self.encoder((x_dict, edge_index_dict))
+        x_dict = self.encoder(x_dict, edge_index_dict)
         return self.head(x_dict['paper'])
     
 model = graphSAGEmodel(dataset.edge_types, hidden_channels, out_channels)
@@ -130,13 +149,15 @@ val_accs = []
 def infer(loader):
     model.eval()
     preds, ys = [], []
-    for batch in loader:
+    for batch in tqdm(loader, desc=f"Infering..."):
+        batch = batch.to(device)
         bs = batch['paper'].batch_size
         x_dict = build_x_dict(batch)
         edge_index_dict = {edge_type : batch[edge_type].edge_index for edge_type in batch.edge_types}
         logits = model(x_dict, edge_index_dict)[:bs]
         preds.append(logits.argmax(-1).cpu())
         ys.append(batch['paper'].y[:bs].view(-1).cpu())
+    
     return torch.cat(preds), torch.cat(ys)
 
 print("Start training...\n")
@@ -147,14 +168,18 @@ for epoch in range(1, num_epochs):
     train_total = 0
 
     for batch in tqdm(train_batch, desc=f"Epoch {epoch}/{num_epochs}"):
+        batch = batch.to(device)
         x_dict = build_x_dict(batch)
         edge_index_dict = {edge_type : batch[edge_type].edge_index for edge_type in batch.edge_types}
+        # x_dict = model.encoder(x_dict, edge_index_dict) # added this
         logits = model(x_dict, edge_index_dict)#['paper']        # add paper
         loss = cross_entropy(logits, batch['paper'].y)
         opt.zero_grad()
         loss.backward()
         opt.step()
         tr_loss += loss.item()
+
+
 
 
         # # Training accuracy on the current batch
@@ -187,9 +212,9 @@ plt.plot([i for i in range(1, num_epochs)], train_accs, label="training", marker
 plt.plot([i for i in range(1, num_epochs)], val_accs, label="validation", marker="o", linewidth=2)
 
 plt.legend(title="Dataset", fontsize=10, title_fontsize=12, loc="best")
-plt.xlabel("Index (time step, node, etc.)")
-plt.ylabel("Value")
-plt.title("Comparison of arrays")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.title("Self Supervised Learning accuracies during training")
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
