@@ -21,7 +21,7 @@ print(torch.cuda.is_available())
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # If your computer does not have enough memory, set temp = True to use preprocessed features
-temp = True
+temp = False
 
 if temp:
     dataset = OGB_MAG(root='GNN-SSL-Project-for-Deep-Learning/data/',
@@ -37,10 +37,10 @@ dataset = dataset.to(device)
 dataset_inductive = dataset_inductive.to(device)
 
 # HYPERPARAMETERS
-num_epochs = 5
+num_epochs = 20
 num_neighbors = [5, 5, 5]
 batch_size = 128
-hidden_channels = 64
+hidden_channels = 256
 out_channels = max(dataset['paper'].y).item() + 1
 
 print("Create batches...\n")
@@ -78,7 +78,7 @@ else:
         t: nn.Embedding(dataset[t].num_nodes, 128)
         for t in featless
     })
-    emb = emb.to(device)
+    # emb = emb.to(device)
 
 class graphSAGEmodel(nn.Module):
     def __init__(self, edge_types, hidden, out_channels):
@@ -94,12 +94,20 @@ class graphSAGEmodel(nn.Module):
             {et: SAGEConv((-1, -1), hidden) for et in edge_types},
             aggr='sum'
         )
+        # layer 3
+        self.conv3 = HeteroConv(
+            {et: SAGEConv((-1, -1), hidden) for et in edge_types},
+            aggr='sum'
+        )
         self.head = Linear(hidden, out_channels)
 
     def forward(self, x_dict, edge_index_dict):
         x_dict = self.conv1(x_dict, edge_index_dict)
+        x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
         #x_dict = {k: ReLU(v) for k, v in x_dict.items()}
         x_dict = self.conv2(x_dict, edge_index_dict)
+        x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
+        x_dict = self.conv3(x_dict, edge_index_dict)
         # return logits for papers only
         return self.head(x_dict['paper'])
     
@@ -182,8 +190,8 @@ print(val_accs)
 plt.figure(figsize=(10, 6))
 
 
-plt.plot([i for i in range(1, num_epochs+1)], train_accs, label="training", marker="o", linewidth=2)
-plt.plot([i for i in range(1, num_epochs+1)], val_accs, label="validation", marker="o", linewidth=2)
+plt.plot([i for i in range(1, num_epochs)], train_accs, label="training", marker="o", linewidth=2)
+plt.plot([i for i in range(1, num_epochs)], val_accs, label="validation", marker="o", linewidth=2)
 
 plt.legend(title="Keys", fontsize=10, title_fontsize=12, loc="best")
 plt.xlabel("Index (time step, node, etc.)")
@@ -193,4 +201,4 @@ plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
 
-plt.savefig("GNN-SSL-Project-for-Deep-Learning/results/baseline_accuracies.png", dpi=300, bbox_inches='tight')
+plt.savefig(f"GNN-SSL-Project-for-Deep-Learning/results/baseline_accuracies_h{hidden_channels}_b{batch_size}.png", dpi=300, bbox_inches='tight')

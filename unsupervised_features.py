@@ -31,7 +31,7 @@ dataset_inductive = dataset_inductive.to(device)
 # HYPERPARAMETERS
 num_neighbors = [5, 5, 5]
 batch_size = 128
-hidden_dim = 64
+hidden_dim = 256
 out_channels = dataset['paper'].x.shape[1]
 
 print("Create batches...\n")
@@ -143,7 +143,7 @@ for batch in train_batch:
     break
 
 
-epochs = 2
+epochs = 20
 print("Start of training...")
 best_loss = torch.inf
 best_model = encoder
@@ -167,7 +167,7 @@ for epoch in range(epochs):
         opt.step()
         opt.zero_grad()
         total_loss_train += loss.item()
-        print(f"Epoch {epoch}, batch {i}, Training loss: {loss.item():.4f}")
+        # print(f"Epoch {epoch}, batch {i}, Training loss: {loss.item():.4f}")
         i += 1
         '''
         if i==5:
@@ -189,7 +189,7 @@ for epoch in range(epochs):
         out_formatted, x_formatted = formatting2loss(out, x_dict, mask)
         loss = mse_loss(out_formatted, x_formatted)
         total_loss_val += loss.item()
-        print(f"Epoch {epoch}, batch {i}, Validation loss: {loss.item():.4f}")
+        # print(f"Epoch {epoch}, batch {i}, Validation loss: {loss.item():.4f}")
         i += 1
         '''
         if i==5:
