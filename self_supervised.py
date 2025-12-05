@@ -13,6 +13,7 @@ from torch.nn import Linear, ReLU, Softmax
 from inductive import to_inductive
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from unsupervised_features import graphSAGE_ENCODER
 
 print(torch.__version__)
 if torch.cuda.is_available():
@@ -80,35 +81,19 @@ else:
     })
     # emb = emb.to(device)
 
+
+
 class graphSAGEmodel(nn.Module):
     def __init__(self, edge_types, hidden, out_channels):
         super().__init__()
-        edge_types = edge_types
-        # layer 1
-        self.conv1 = HeteroConv(
-            {et: SAGEConv((-1, -1), hidden) for et in edge_types},
-            aggr='sum'
-        )
-        # layer 2
-        self.conv2 = HeteroConv(
-            {et: SAGEConv((-1, -1), hidden) for et in edge_types},
-            aggr='sum'
-        )
-        # layer 3
-        self.conv3 = HeteroConv(
-            {et: SAGEConv((-1, -1), hidden) for et in edge_types},
-            aggr='sum'
-        )
+        # edge_types = edge_types
+        encoder = graphSAGE_ENCODER(dataset.edge_types, hidden_channels).to(device)
+        self.encoder = encoder.load_state_dict(torch.load("best_encoder_b128_h256.pth"))
         self.head = Linear(hidden, out_channels)
 
     def forward(self, x_dict, edge_index_dict):
-        x_dict = self.conv1(x_dict, edge_index_dict)
-        x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
-        #x_dict = {k: ReLU(v) for k, v in x_dict.items()}
-        x_dict = self.conv2(x_dict, edge_index_dict)
-        x_dict = {k: ReLU()(v) for k, v in x_dict.items()}
-        x_dict = self.conv3(x_dict, edge_index_dict)
         # return logits for papers only
+        x_dict = self.encoder((x_dict, edge_index_dict))
         return self.head(x_dict['paper'])
     
 model = graphSAGEmodel(dataset.edge_types, hidden_channels, out_channels)
@@ -201,4 +186,4 @@ plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
 
-plt.savefig(f"GNN-SSL-Project-for-Deep-Learning/results/baseline_accuracies_h{hidden_channels}_b{batch_size}.png", dpi=300, bbox_inches='tight')
+plt.savefig(f"GNN-SSL-Project-for-Deep-Learning/results/self_supervised_accuracies_h{hidden_channels}_b{batch_size}.png", dpi=300, bbox_inches='tight')
