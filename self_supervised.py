@@ -87,8 +87,16 @@ class graphSAGEmodel(nn.Module):
     def __init__(self, edge_types, hidden, out_channels):
         super().__init__()
         # edge_types = edge_types
-        encoder = graphSAGE_ENCODER(dataset.edge_types, hidden_channels).to(device)
-        self.encoder = encoder.load_state_dict(torch.load("best_encoder_b128_h256.pth"))
+        self.encoder = graphSAGE_ENCODER(dataset.edge_types, hidden_channels).to(device)
+
+        state = torch.load("best_encoder_b128_h256.pth", map_location=device)
+        self.encoder.load_state_dict(state)
+
+        # Freeze encoder to prevent retraining it
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+        # self.encoder = encoder.load_state_dict(torch.load("best_encoder_b128_h256.pth"))
         self.head = Linear(hidden, out_channels)
 
     def forward(self, x_dict, edge_index_dict):
